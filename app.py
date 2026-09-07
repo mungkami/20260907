@@ -1,92 +1,128 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from datetime import date
 from typing import TypedDict
 
 import streamlit as st
 
 
-class Todo(TypedDict):
+PAGE_TITLE = "독서 기록"
+DATE_FORMAT = "%Y-%m"
+
+
+class Book(TypedDict):
     id: int
-    title: str
-    completed: bool
+    name: str
+    author: str
+    added_on: date
+    read: bool
 
 
 def initialize_state() -> None:
-    if "todos" not in st.session_state:
-        st.session_state.todos: list[Todo] = []
-    if "next_todo_id" not in st.session_state:
-        st.session_state.next_todo_id = 1
+    if "books" not in st.session_state:
+        st.session_state.books: list[Book] = []
+    if "next_book_id" not in st.session_state:
+        st.session_state.next_book_id = 1
 
 
-def add_todo(title: str) -> None:
-    st.session_state.todos.append(
+def add_book(name: str, author: str, added_on: date) -> None:
+    st.session_state.books.append(
         {
-            "id": st.session_state.next_todo_id,
-            "title": title.strip(),
-            "completed": False,
+            "id": st.session_state.next_book_id,
+            "name": name.strip(),
+            "author": author.strip(),
+            "added_on": added_on,
+            "read": False,
         }
     )
-    st.session_state.next_todo_id += 1
+    st.session_state.next_book_id += 1
 
 
-def render_summary(todos: list[Todo]) -> None:
-    completed_count = sum(todo["completed"] for todo in todos)
-    pending_count = len(todos) - completed_count
-    completed_column, pending_column, total_column = st.columns(3)
-    completed_column.metric("완료", completed_count)
-    pending_column.metric("미완료", pending_count)
-    total_column.metric("전체", len(todos))
+def render_summary(books: list[Book]) -> None:
+    read_count = sum(book["read"] for book in books)
+    unread_count = len(books) - read_count
+    read_column, unread_column, total_column = st.columns(3)
+    read_column.metric("읽은 책", read_count)
+    unread_column.metric("읽을 책", unread_count)
+    total_column.metric("전체 도서", len(books))
 
 
-def render_todo_list() -> None:
-    todos: list[Todo] = st.session_state.todos
-    if not todos:
-        st.info("아직 등록된 할 일이 없습니다.")
+def render_book_list() -> None:
+    books: list[Book] = st.session_state.books
+    if not books:
+        st.info("아직 등록된 책이 없습니다.")
         return
 
-    todos_to_delete: list[int] = []
-    for todo in todos:
-        checkbox_column, title_column, delete_column = st.columns([0.08, 0.82, 0.1])
-        is_completed = checkbox_column.checkbox(
-            "완료",
-            value=todo["completed"],
-            key=f"todo_completed_{todo['id']}",
+    books_to_delete: list[int] = []
+    for book in books:
+        read_column, book_column, delete_column = st.columns([0.08, 0.77, 0.15])
+        is_read = read_column.checkbox(
+            "읽음",
+            value=book["read"],
+            key=f"book_read_{book['id']}",
             label_visibility="collapsed",
         )
-        todo["completed"] = is_completed
+        book["read"] = is_read
 
-        title = f"~~{todo['title']}~~" if is_completed else todo["title"]
-        title_column.markdown(title)
-        if delete_column.button("삭제", key=f"todo_delete_{todo['id']}"):
-            todos_to_delete.append(todo["id"])
+        book_title = f"~~{book['name']}~~" if is_read else f"**{book['name']}**"
+        book_column.markdown(f"{book_title}  \n{book['author']} · {book['added_on']:%Y년 %m월 %d일}")
+        if delete_column.button("삭제", key=f"book_delete_{book['id']}"):
+            books_to_delete.append(book["id"])
 
-    if todos_to_delete:
-        st.session_state.todos = [
-            todo for todo in todos if todo["id"] not in todos_to_delete
+    if books_to_delete:
+        st.session_state.books = [
+            book for book in books if book["id"] not in books_to_delete
         ]
         st.rerun()
 
 
+def render_monthly_statistics(books: list[Book]) -> None:
+    if not books:
+        st.info("도서를 등록하면 월별 통계가 표시됩니다.")
+        return
+
+    monthly_counts: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"등록 도서": 0, "읽은 도서": 0}
+    )
+    for book in books:
+        month = book["added_on"].strftime(DATE_FORMAT)
+        monthly_counts[month]["등록 도서"] += 1
+        if book["read"]:
+            monthly_counts[month]["읽은 도서"] += 1
+
+    chart_data = {
+        category: {month: counts[category] for month, counts in sorted(monthly_counts.items())}
+        for category in ("등록 도서", "읽은 도서")
+    }
+    st.bar_chart(chart_data)
+
+
 def main() -> None:
-    st.set_page_config(page_title="할 일 관리", page_icon="✅", layout="centered")
+    st.set_page_config(page_title=PAGE_TITLE, page_icon="📚", layout="centered")
     initialize_state()
 
-    st.title("할 일 관리")
-    st.caption("오늘 해야 할 일을 한곳에서 관리하세요.")
+    st.title("독서 기록")
+    st.caption("읽고 싶은 책과 독서 진행 상황을 기록하세요.")
 
-    with st.form("add_todo_form", clear_on_submit=True):
-        title = st.text_input("새 할 일", placeholder="예: 장보기 목록 정리")
-        submitted = st.form_submit_button("할 일 추가", type="primary", use_container_width=True)
+    with st.form("add_book_form", clear_on_submit=True):
+        name = st.text_input("책 제목", placeholder="예: 데미안")
+        author = st.text_input("저자", placeholder="예: 헤르만 헤세")
+        added_on = st.date_input("등록일", value=date.today())
+        submitted = st.form_submit_button("책 추가", type="primary", use_container_width=True)
         if submitted:
-            if title.strip():
-                add_todo(title)
+            if name.strip() and author.strip():
+                add_book(name, author, added_on)
                 st.rerun()
-            st.warning("할 일 내용을 입력해 주세요.")
+            st.warning("책 제목과 저자를 모두 입력해 주세요.")
 
     st.divider()
-    render_summary(st.session_state.todos)
-    st.subheader("할 일 목록")
-    render_todo_list()
+    books: list[Book] = st.session_state.books
+    render_summary(books)
+    st.subheader("내 서재")
+    render_book_list()
+    st.subheader("월별 통계")
+    render_monthly_statistics(books)
 
 
 if __name__ == "__main__":
